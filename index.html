@@ -1,0 +1,828 @@
+<!--suppress XmlDuplicatedId, CssUnusedSymbol -->
+<HTML>
+<HEAD>
+    <TITLE id=TITLE>Tic Tac Toes</TITLE>
+    <!--https://www.youtube.com/watch?v=s93KC4AGKnY-->
+    <STYLE>
+        @import url(https://fonts.googleapis.com/css?family=Press+Start+2P);
+
+        @font-face {
+            font-family: Tox;
+            src: url("tox.otf") format("opentype");
+        }
+
+        @font-face {
+            font-family: 'XOfont';
+            src: local('WingDings');
+            unicode-range: U+4F, U+58;
+        }
+
+        game-toes {
+            --boardsize: 50vh;
+            --borderWidth: 5px;
+            margin: 0 auto;
+            display: block;
+            border: var(--borderWidth) solid var(--playercolor, grey);
+            color: var(--playercolor, #000);
+        }
+
+        game-toes::after {
+            font-size: 5em;
+            /*content: "var(--playercolor)";*/
+        }
+    </STYLE>
+    <SCRIPT>
+        //region ========================================================== F12 Console traces with lots of colors
+        /**
+         * See F12 console
+         * Enhance default console with (Chrome) colored console
+         * eg: console.text( "mySection[||BACKGROUNDCOLOR][||COLOR]", data )
+         *
+         * UglifyJS drop_console=true will remove all `console.` statements
+         * **/
+        console.log(function (
+            $_background = 'background:',
+            $_color = ';color:',
+            $_bold = ';font-weight:bold',
+            $_teal_white = `${$_background}teal${$_color}white;`,
+            $_linebreak = '\n'
+        ) {
+            let labelWithFunctionName = label => {
+                let errorStack = new Error().stack;
+                // console.log(errorStack);
+                return `%c ${label}: %c at: ${errorStack
+                    .split('at ')                   // create array of stack-trace
+                    .splice(3)[0]                   // discard 2 recent calls (within this console function)
+                    .split($_linebreak)[0]          // get part before line-break
+                    .replace("(http", "%c http")}`;
+            };
+
+            // let consoleMethods = "log,info,error,warn,group,groupCollapsed,groupEnd,table,time,timeEnd,count,trace,assert";
+
+            console.text = function () {
+                let params = Array.from(arguments);                                     // get all parameters and proces first parameter as label/CSS
+                if (params.length === 0) params = [labelWithFunctionName('stack'), `${$_background}red${$_color}yellow${$_bold}`];
+                let labelDef = String(params.shift()).split('||');                      // cast first parameter to String, then split on || to get CSS
+                // define optional second backgroundcolor after dot (.)
+                console.log.apply(
+                    null,
+                    [
+                        "%c TicTacToes %c " + labelDef[0] + ' ',
+                        $_background + 'lightgreen;',                                   // styling first %c appName
+                        $_background + (labelDef[1] || "green")                         // label background
+                        + $_color + (labelDef[2] || "white")                            // label text color
+                        + ((labelDef[2] === "black" || labelDef[3] === "bold")          // label fontweight
+                            ? $_bold
+                            : ''),
+                        ...params                                                       // remaining parameters
+                    ]
+                );
+            };
+
+            console.logerror = function (err) {
+                console.text(
+                    labelWithFunctionName('Error'),   // pass current Stack
+                    `${$_background}red${$_color}yellow${$_bold}`,                            // styling first %c
+                    $_teal_white,                                            // styling second %c
+                    err
+                );
+            };
+
+            console.event = function (eventname, eventarget) {
+                console.text(' Event: ' + eventname + '||orange||black', eventarget);
+            };
+
+            console.rows = function (rows, idfield = $_DEF.ID) {
+                console.text(
+                    labelWithFunctionName('Rows'),          // pass current Stack
+                    `${$_background}gold${$_bold}`,                                // styling first %c
+                    $_teal_white,                                    // styling second %c
+                    $_linebreak,
+                    rows.length + " rows , ids: " + rows[0][idfield] + " - " + rows[rows.length - 1][idfield]
+                );
+            };
+
+            // create extra Event listeners for debugging purposes
+            //https://developer.mozilla.org/en-US/docs/Web/Events
+            ['DOMContentLoaded', 'hashchange', 'load', 'click', 'focus', 'blur'].map(evt => window.addEventListener(evt, () => console.event(evt, event ? event.target : '')));
+
+            return `%c Init logging`;
+        }(), 'background:#0F0');
+
+        //endregion ======================================================= F12 Console traces with lots of colors
+    </SCRIPT>
+</HEAD>
+<BODY onload="console.event('BODY onload');">
+<game-toes>
+    <TEMPLATE id="template_custom-element_game-toes">
+        <STYLE>
+            :host {
+                display: inline-block;
+                /* responsive font-size: https://codepen.io/dannievinther/pen/GNExxb*/
+
+                --toes_mimimumsize: 10vh;
+                --toes_boardsize: var(--boardsize, var(--toes_mimimumsize));
+
+                min-width: var(--toes_mimimumsize);
+                min-height: var(--toes_mimimumsize);
+                width: var(--toes_boardsize);
+                height: var(--toes_boardsize);
+
+                --playerX-color: red;
+                --playerO-color: blue;
+                border: 5px solid var(--playercolor, grey);
+                color: var(--playercolor, #000);
+
+                --square-color: lightgrey;
+                --square-hover-color: green;
+                --square-played-color: lightgreen;
+                --square-played-textcolor: black;
+                --square-currentplayer-color: lightgreen;
+                --square-win-color: green;
+                --square-win-textcolor: white;
+
+                --gridline-color: darkgrey;
+                --gridline-width: 3px;
+                --squaresize: calc((var(--toes_boardsize) / 3) - var(--gridline-width));
+
+                font-family: Arial, sans-serif;
+                --fontSize: calc((var(--toes_boardsize) / 3) * .7);
+            }
+
+            :host(#Game:not(:focus)) {
+                --playercolor: grey; /* QUESTION: Is it possible to change the host/parent bordercolor here? */
+            }
+
+            /* changed font! */
+            #Game > DIV { /* show the X or O in played squares */
+                /*font-family: Tox;*/
+                /*/ / XOfont, Arial, sans-serif;*/
+            }
+
+            :host([player="X"]) { /* set player X parent element border color */
+                --playercolor: var(--playerX-color);
+            }
+
+            :host([player="O"]) { /* set player O parent element border color */
+                --playercolor: var(--playerO-color);
+
+                /* the parent ALWAYS has higher Specifity, but !important can be used in 'emergencies' */
+                /*border: dashed deeppink !important;*/
+            }
+
+            :host([hidden]) { /* Custom Elements best practice: respect hidden attributes (default overruled by parent specificity) */
+                display: none;
+            }
+
+            #Game {
+                width: var(--toes_boardsize);
+                height: var(--toes_boardsize);
+                font-size: 10px;
+                margin: 0 auto;
+                background-color: var(--gridline-color);
+
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: space-between;
+                align-content: space-between;
+
+                counter-reset: square_idx -1; /* count 9 game squares as variable N , start at -1 so the first is numbered 0 */
+                outline: none; /* no blue-ish (default) outline color when element has focus */
+            }
+
+            #Game:not(:focus) {
+                filter: grayscale(100%);
+
+                /* Can not set host/parent border-color; but the outline overlaps the border: */
+                outline: solid var(--borderWidth);
+            }
+
+            #Game > DIV { /* format all direct Descendants in Game */
+                font-size: var(--fontSize);
+                counter-increment: square_idx;
+
+                display: flex; /* flex styling to center content in divs */
+                align-items: center; /* vertical alignment */
+                justify-content: center; /* horizontal alignment */
+
+                width: var(--squaresize);
+                height: var(--squaresize);
+
+                background: var(--square-color);
+
+                /* checkers */
+                /*background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAMAAAC6V+0/AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyJpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMy1jMDExIDY2LjE0NTY2MSwgMjAxMi8wMi8wNi0xNDo1NjoyNyAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENTNiAoV2luZG93cykiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6MDYwNzc5NjA0OTJBMTFFMkFDQTNEQjdDODMyMTVBQTEiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6MDYwNzc5NjE0OTJBMTFFMkFDQTNEQjdDODMyMTVBQTEiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDowNjA3Nzk1RTQ5MkExMUUyQUNBM0RCN0M4MzIxNUFBMSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDowNjA3Nzk1RjQ5MkExMUUyQUNBM0RCN0M4MzIxNUFBMSIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PiA4R9UAAAAGUExURRUVFf///zkFs6oAAAACdFJOU/8A5bcwSgAAABhJREFUeNpiYIQDBgQY0oLDxBsIQYAAAwCltADJzmw8TwAAAABJRU5ErkJggg==");*/
+            }
+
+            #_::after { /* square_DIV nr (=keypad keys) indicators */
+                font-family: Arial, sans-serif;
+                color: grey;
+                font-size: calc(var(--fontSize) / 3);
+            }
+
+            :host(:not([winner])) #Game:focus #_::after {
+                content: counter(square_idx) '=key ' attr(keynr);
+            }
+
+            :host(:not([winner])) #_:hover { /* highlight the current square_DIV */
+                background: var(--square-hover-color);
+            }
+
+            :host(:not([winner])) #Game:focus #_:hover:after { /* remove key info on hover, Specificity required to overrule previous selector */
+                content: unset;
+            }
+
+            :host(:not([winner])[player='X']) #_ {
+                cursor: url("data:image/png;base64,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") 64 64, pointer;
+            }
+
+            :host(:not([winner])[player='O']) #_ {
+                cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAMAAAD04JH5AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAMAUExURQAAAAEBAQICAgMDAwQEBAUFBQYGBgcHBwgICAkJCQoKCgsLCwwMDA0NDQ4ODg8PDxAQEBERERISEhMTExQUFBUVFRYWFhcXFxgYGBkZGRoaGhsbGxwcHB0dHR4eHh8fHyAgICEhISIiIiMjIyQkJCUlJSYmJicnJygoKCkpKSoqKisrKywsLC0tLS4uLjAwMDExMTIyMjMzMzQ0NDU1NTc3Nzk5OTo6Ojw8PD09PT4+Pj8/P0BAQEFBQUJCQkNDQ0REREVFRUZGRkdHR0hISElJSUpKSktLS01NTU5OTk9PT1BQUFFRUVJSUlNTU1VVVVZWVldXV1hYWFlZWVpaWltbW1xcXF1dXV5eXl9fX2JiYmNjY2VlZWdnZ2hoaGlpaWpqamtra2xsbG1tbW5ubm9vb3BwcHFxcXNzc3R0dHV1dXd3d3h4eHl5eXp6ent7e3x8fH19fX5+fn9/f4CAgIKCgoODg4SEhIWFhYeHh4qKiouLi4yMjI6Ojo+Pj5CQkJGRkZOTk5SUlJaWlpiYmJmZmZqampubm5ycnJ2dnZ6enp+fn6CgoKGhoaKioqOjo6SkpKWlpaampqenp6ioqKqqqqurq6ysrK2tra6urq+vr7CwsLGxsbKysrS0tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALjq+OsAAAEAdFJOU////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////wBT9wclAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAGHRFWHRTb2Z0d2FyZQBwYWludC5uZXQgNC4xLjFjKpxLAAAGSUlEQVR4Xu2a+XMURRSAX19z7c5uNoEQNiGSAAFRSVAgoMYgBEQikgABBBUUDxAEFRAEooLgBV6Icmj4V8fXm2cVqWK2Xy9WWZbz/TB5r3ey8810Tx8zC9m/TCFQCBQChUAhUAgUAoVAIVAIFAL/aYH7Z8ZXL+uohErFtQV9Gz+4SeVetCwwvacOEChAhN2A0tGinT/Tp3xaFJhaqsJSYqQOGwZKG4FbgLTvOO3BpSWBbaEJhWyceBAb+wdUSYK0FyRceYX24tGCwEEDVd04aBTjUWcrALdSztZG8CrtyMJb4NJy6Cjh0RqHhahGAURphFudVGOAFd/Szgx8BXZBewVEJYTYKGXs5RcSWwBGwsSlGK9AWYPp5bcEP4ErqyECYU9VgcQKV50DL+09fvnm3bu3f7l24eT+4d72soE4gp5D9B9OvAS+TKECeJZRgjUNemD35/TBA5ybqIcGb4h3KXfhI3BIdgFgFQe2zqvbc+/5q5tKKjTTlDnwEJhSCRidalCVsP8AFeZwpCtcPkNxc/gCbwWlmj11qALspbIm7OuboKg5bIEPQcd4m9vLP0ZFDo7Q3+ZwBc6rCOIA0tCk3ObFgylwvZ5ACZtgKutfUNE/BFPgCW2rHnvA1VTgZM8fFDjgCUwqk2BXB8EAFbjZ3EeBA5bAj9jBa+wDzSAVMDjT8RxFzWEJrIVG/xotoZxFIvZT1BSOwGk8eZx4iEW/UgGL7jZxjsJmcAQWNkbfsO085Ty2GNNLYTMYAkdx6DGgzSuUMzmNN80pipvAEFjagSNQLLop5fIDjtrLKG6CW+DT1N7/gfqOci6/JwnIE5Tk4xYYCqIyDgLbKeUTBQZWUJyPW2BeZK9A9y1K+dQDAZ3O/tAp8DEOgCqGg5R6MIhTZ/M+Jbk4BUbATsPmUebDszhJhg2U5OIU6NYCa+BlynwYs/O3LkpycQnMYA+MU+BrlPowDjIEeYeyPFwClySehh6izIsdoLEVfEZZHi6BYxLXgew59hzGIcTVw3uU5eES2IHrHNDMycVctoLChdJWyvJwCYxJCCPfXniWkYbACGV5uASGRRClo5T4MWRXzvJpyvJwCQyqIFStzYMXgxDCrKQsD5fAqkCalm7CLOvA8xeBazRwCawxOBmh2I9b2H9poVzTSNeXP4+9UCv9MC6TcRZnBKynNA+XwBh2hE9S7Mc7KIDj4UZK83AJ7FQQPEOxH0NGV2QEk5Tm4RI4rIVhr4bmgAs5KQQ8ak84rbRsSeCKfYapQH9NeR4ugQzHE1df8lAmFI6FKipRmotToNNjQfogvYlqk5A6e3GnwAiIxyn04SIkkAIkmyjPxSlwypg6hT4MYwu0c8KLlOfiFLhZiSoUevCT0vZpTtlQno9TIFsiK16L0gajuCwqQaqdNcAQOGvgEwrZfNV4mhKBvEAF+bgFss7gdYrYLNJxza6oOyhvAkNgVPt2BEegMzS4nDMMc4bAjQXhPQp53AjsXKwMknP7MASy7fIjingM4DBodBiwJtMcgavz11DEYgzbH+gUUsbTAZ4ATrBPUsRgF45AEZgwhGNU0hSWQNYVuJ80EHsCMBJMGyS8y8YT+DzRZyl0cCAOqwIig8sZKnHA3G1n4FzkNXghhHIVVCpl+TQVOWAK3BuMYBvF+cz0K0hxKtgWQbyLylwwBbJv4mB+v6NjfbO20LZ/JUqg1lKZE65ANg3QHjZ9UfMU1ABiJWIchjdTmRu2QHYeoAdMbkvYh6tYuw7AWQjAMH/85Atkh0uBiKFn8iFffn1bDXvfUtnWgK6YoT+pnIGHQHaiE4ySUFq5e84rucuT2PakfR4DJjK4Hb1Pn3DwEcjO9uItLnG1CtGSVRvG906Nb9yweD4e0j7N1hF2QEhtN+3Nw0sgu7veTrRUoAUo3fjxgrKvj1Xj0EGIY2DwmN/be08BvNVkySpUbHUjGhNc/ggdJYH9DUP/i7QfG1+B7LeJatRu3x4SOmz8hEHZH1CYNZ6nj3gLZNmddaAr9gkYHt2+wJdKayUVJFu+pz18aEEAeaM/DbSyc47G7ybwApSH3qbPPGlNADk6tbaehFEC5Z4V617zv/R/07LALDO3KWiZRxR4dAqBQqAQKAQKgUKgECgECoFCoBAoBAqBQuD/LpBlfwHG7i6yXPL2HQAAAABJRU5ErkJggg==") 64 64, pointer;
+            }
+
+            :not(#_)::before,
+            #X::before, /* show the X or O in played squares */
+            #O::before {
+                /*font-size: larger;*/
+                content: attr(id);
+                text-shadow: 1px 1px wheat;
+
+                /* todo:transition */
+                /*transition: all 3000ms 0s ease-in-out;*/
+            }
+
+            /*#X::after {*/
+            /*position: absolute;*/
+            /*color:darkblue;*/
+            /*content: "\03A7";*/
+            /*}*/
+
+            /*#O::after {*/
+            /*position: absolute;*/
+            /*color:pink;*/
+            /*content: "\039F";*/
+            /*}*/
+
+            #X,
+            #O {
+                background: var(--square-played-color);
+                color: var(--square-played-textcolor);
+                cursor: not-allowed;
+                pointer-events: none; /* disable events on played squares , but resets the cursor to pointer! */
+                animation-name: appear_animation;
+                animation-duration: .25s;
+            }
+
+            @keyframes appear_animation {
+                from {
+                    opacity: 0;
+                    transform: scale(0);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
+
+            #Game > DIV:not(#_):not(#X):not(#O) {
+                background: var(--square-win-color);
+            }
+
+            /* :host [winner] */
+            :host([winner]) #_::after { /* remove all squarenrs */
+                content: unset;
+            }
+
+            :host([winner]) { /* remove grid lines */
+                --squaresize: calc((var(--toes_boardsize) / 3));
+            }
+
+            :host([winner]) :not(DIV.winning_square) { /* for the winner, dim all but winning squares */
+                opacity: 0.3;
+                pointer-events: none;
+                color: var(--square-played-textcolor);
+            }
+
+            :host([winner="O"])::before,
+            :host([winner="X"])::before {
+                color: gold;
+                content: "player " attr(winner) " wins!";
+            }
+
+            :host([winner="NONE"]) { /* remove bordercolor on Custom Element parent */
+                --playercolor: unset;
+            }
+
+            :host([winner="NONE"])::before {
+                content: "No winner";
+                cursor: pointer;
+            }
+
+            #Game .winning_square {
+                /* Win squares, Higher Specificity with #Game required because background was already set by #Game > Div */
+                background: var(--playercolor, green);
+                color: white;
+                text-shadow: 2px 2px grey;
+                font-weight: bold;
+            }
+
+            /* Game instructions */
+            :host::before {
+                position: absolute;
+                width: var(--toes_boardsize);
+                /*height: var(--boardsize);*/
+                background: black;
+                __background: var(--playercolor);
+                box-sizing: border-box;
+                padding: .3em;
+                opacity: .8;
+                z-index: 2;
+
+                font-size: 2em;
+                text-align: center;
+                text-shadow: 0 0 1em #5d9293;
+                color: #B0FDFF;
+                white-space: pre;
+            }
+
+            :host(:not([winner])[players="2"][board*="_"])::before,
+            :host(:not([winner])[players="1"][tosswinner="2"][player="O"][board*="_"])::before,
+            :host(:not([winner])[players="1"][tosswinner="1"][player="X"][board*="_"])::before {
+                font-size: 1em;
+                content: "Your turn! " attr(player);
+            }
+
+            :host([player="AI"])::before {
+                content: "AI thinking...";
+            }
+
+            :host([player="AI"]) #Game#Game {
+                pointer-events: none;
+                cursor: none;
+            }
+        </STYLE>
+        <STYLE id="config_Highlight-current-player_played-squares">
+            :host([player='X']:not([winner])) #X,
+            :host([player='O']:not([winner])) #O {
+                background: var(--square-currentplayer-color); /* highlight current players moves */
+                /*color: var(--playercolor);*/
+                font-weight: bold;
+            }
+        </STYLE>
+        <STYLE id="config_Color-opponent-letters_player-squares">
+            :host(:not([winner])[player='O']) #X {
+                color: var(--playerX-color);
+            }
+
+            :host(:not([winner])[player='X']) #O {
+                color: var(--playerO-color);
+            }
+        </STYLE>
+        <STYLE id="CRT">
+            #Game::before {
+                position: relative;
+                top: 0;
+                left: 0;
+                width: var(--toes_boardsize);
+                box-sizing: border-box;
+                font-family: 'Press Start 2P', sans-serif;
+                padding: .3em;
+                font-size: 1em;
+                text-shadow: 0 0 1em #5d9293;
+                background: black;
+                color: #B0FDFF;
+                white-space: pre;
+                content: unset;
+            }
+        </STYLE>
+        <!--<STYLE id="CRTcursor">-->
+        <!--#Game::after {-->
+        <!--font-family: 'Press Start 2P', sans-serif;-->
+        <!--position: absolute;-->
+        <!--font-size: var(&#45;&#45;fontSize);-->
+        <!--color: green;-->
+        <!--content: 'X';-->
+        <!--}-->
+        <!--</STYLE>-->
+
+        <STYLE id=XXX>
+            #Game::before {
+                content: "I beat you!!!";
+                font-size: 6em;
+                text-align: center;
+                background: gold;
+                color: black;
+            }
+        </STYLE>
+        <STYLE id=OOO>
+            #Game::before {
+                content: "Okay, You win..";
+                font-size: 6em;
+                text-align: center;
+                background: dimgrey;
+                color: lightgrey;
+            }
+        </STYLE>
+
+        <DIV id="Game" tabindex="0">
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+            <DIV id=_></DIV>
+        </DIV>
+
+    </TEMPLATE>
+</game-toes>
+<SCRIPT id="Controller">
+    !function (document) {
+        const __player = 'player',
+            __players = 'players',
+            __gamestate = 'gamestate',
+            __gamestate_intro = 'intro',
+            __gamestate_toss = 'toss',
+            __gamestate_playing = 'playing',
+            __gamestate_winner = 'winner',
+            __board = 'board',
+            __tosswinner = 'tosswinner',
+            __winner = 'winner',
+            __emptymarker = '_',
+            __square_idx = "0123456789",
+            __square_keynrs = "789456123";
+
+        let __CSSconsole_label_1 = '||gold||black';
+
+        let split = (x, y = '') => x.split(y),                  // split string x on character y
+            rand = x => 0 | x * Math.random(),                  // random integer between 0 and x
+            count = (x, y) => split(x, y).length - 1,           // count number of character y in string x
+
+            XOline_to_array = line => x => x.map(n => line[n]), // convert (idx) [7,5,3] diagonal to ['_','X','O']
+            XOline_sorted = x => ([...x].sort()).join``,        // sort array x , return one (joined) string
+
+            checklines = split('012_345_678_036_147_258_048_246', __emptymarker);// 8 winning combinations
+
+        window.customElements.define('game-toes', class extends HTMLElement {
+                // noinspection JSUnusedGlobalSymbols
+                static get observedAttributes() {
+                    // return [__board, __gamestate, __players];
+                }
+
+                log() {
+                    let args = [...arguments];
+                    console.text((args[1] ? '' : 'Custom Element: game-toes : ') + args.shift() + "||LIGHTBLUE||BLACK", ...args);
+                };
+
+                addEvent(eventName, callbackFunc) {
+                    this.addEventListener(eventName, callbackFunc);
+                    /** store all removeEventListener functions, so they can be executed when CustomElement is removed from DOM **/
+                    this.registeredEvents.push(() => this.removeEventListener(eventName, callbackFunc));
+                }
+
+                hideStylesheet(id, hidden = true) {
+                    // noinspection JSCheckFunctionSignatures
+                    this.shadowRoot.querySelector('#' + id).disabled = hidden;
+                }
+
+                currentplayer() {
+                    return count(this.board, 'X') === count(this.board, 'O') ? 'X' : 'O';
+                }
+
+                square_DIV(idx, value = false) {
+                    try {
+                        let div = this.Game.children[idx];
+                        if (value) div.id = value;
+                        return div;
+                    } catch (e) {
+                        console.error('square_DIV error:', e);
+                    }
+                }
+
+                endgame(winplayer, winningline = false) {
+                    this.log('endgame', winplayer, winningline);
+                    this.player = winplayer;
+                    if (winningline) {
+                        this.winner = winplayer[0];
+                        split(winningline).map(nr => this.square_DIV(nr).classList = 'winning_square');
+                    } else {
+                        this.winner = winplayer;
+                    }
+                    throw winplayer;
+                }
+
+                checkwinner() {// check 8 combinations for a winning line
+                    this.log('checkwinner');
+                    this.player = this.currentplayer();
+                    [...checklines].map(line => {
+                        let XO = XOline_sorted(XOline_to_array(this.board)(split(line)));
+                        if (/(XXX|OOO)/.test(XO)) this.endgame(XO, line);
+                    });
+                }
+
+                get board() {
+                    return this.getAttribute(__board);
+                }
+
+                set board(value) {
+                    console.text('set board:' + __CSSconsole_label_1, value);
+                    if (value.length === 9) {
+                        this.setAttribute(__board, value);
+                        if (!this.squares) {
+                            this.squares = split(value).map((char, idx) => {
+                                let div = this.square_DIV(idx, char);
+                                div.classList = '';// remove all (.winning) classes
+                                div.idx = idx;
+                                div.setAttribute('keynr', __square_keynrs[idx]);
+                                return div;
+                            });
+                        }
+                        this.checkwinner();
+                    } else {
+                        console.logerror('Illegal board:', value);
+                    }
+                }
+
+                get turn() {/* turn is determined from board, so no setter */
+                    let nr = 10 - count(this.board, __emptymarker);
+                    this.setAttribute('turn', String(nr));
+                    return nr;
+                }
+
+                startgame(
+                    boardnr = 3,
+                    board = ['_________', '__OOX_OXX', 'OXXXOOOOX', '_X_XX_OO_', 'OX_XX_OOX', 'TTT_T__T_', 'XOXOXOXOX'][boardnr]
+                ) {
+                    this.log('startgame' + __CSSconsole_label_1, board);
+                    this.squares = false;
+                    this.removeAttribute(__winner);
+                    this.board = board;
+                    this.tosswinner = 2;// 1 or 2
+                    this.players = 1;
+                    this.gamestate = __gamestate_playing;
+                    this.gameplay = this.gameplayGenerator();
+                    this.gameplay.next(this.tosswinner === 2);
+                }
+
+                is_AI_move() {
+                    // returns T/F for corresponding BIT in AI_level
+                    //   0 = 00000000 = 2 players, no AI, both human
+                    //  85 = 01010101 = 1 player , AI (right most bit) won toss, plays X
+                    // 170 = 10101010 = 1 player , Human (right most bit) won toss, plays X
+                    // 255 = 11111111 = 0 players , both AI
+                    //       |     ||___ turn 1 = 00000001 = 1
+                    //       |     |____ turn 2 = 00000010 = 2
+                    //        .....
+                    //       |__________ turn 8 = 10000000 = 128
+                    //                   turn 9 is always automatic
+                    let AI = [255, 170, 85, 0][[0, this.tosswinner, 3][this.players]];
+                    // returns TRUE for 1 bit and FALSE for 0 bit
+                    return (AI & 2 ** (this.turn - 1)) > 0;//=Math.pow( AI&2 , this.turn-1 ) > 0
+                }
+
+                make_AI_moves(moves = false) {
+                    this.player = "AI";
+                    this.AI_interval = setTimeout(() => {
+                        this.gameplay.next(true);
+                        clearTimeout(this.AI_interval);
+                    }, 1500);
+                }
+
+                isempty(x) {
+                    return this.square_DIV(x).id === __emptymarker;
+                }
+
+                randomEmpty() {
+                    // noinspection CommaExpressionJS
+                    let empties = split(this.board).reduce((e, x, i) => this.isempty(i) ? (e.push(i), e) : e, []);
+                    return empties[rand(empties.length - 1)]
+                }
+
+                bestmove() {
+                    let winlines = [...checklines],//,'01236','01258','25678','03678'],
+                        line, _bestmove = false, XOa, XO;
+                    let checks = {
+                        O: {
+                            OO_: 2,
+                            O_O: 1,
+                            _OO: 0,
+                            XX_: 2,
+                            X_X: 1,
+                            _XX: 0,
+                            O___O: 2
+                        },
+                        X: {
+                            XX_: 2,
+                            X_X: 1,
+                            _XX: 0,
+                            OO_: 2,
+                            O_O: 1,
+                            _OO: 0,
+                            X___X: 2
+                        }
+                    };
+                    console.text('getting bestmove', this.board);
+                    while (line = winlines.pop()) {
+                        let squarenrs = split(line);//todo highlight checkingline
+                        XOa = XOline_to_array(this.board)(squarenrs);
+                        XO = XOline_sorted(XOa);
+                        if (this.isempty(4)) _bestmove = 4;
+                        else if (/(XX|OO)_/.test(XO)) _bestmove = squarenrs[XOa.indexOf(__emptymarker)];
+                        if (_bestmove !== false) break;
+                    }
+                    console.text('bestmove:', this.board, line, XOa, XO, _bestmove);
+                    return _bestmove ? ~~_bestmove : this.randomEmpty();
+                }
+
+                * gameplayGenerator() {
+                    try {
+                        this.log('generator start players:' + this.players);
+                        let nextmove = false;
+                        let setsquare = x => {
+                            console.log('setsquare', x);
+                            if (this.isempty(x)) {
+                                let boardArr = split(this.board);
+                                boardArr[x] = this.square_DIV(x).id = this.currentplayer();
+                                this.board = boardArr.join``;
+                                console.text('player:', boardArr[x], 'played', x, this.board);
+                            } else {
+                                // user clicked a filled square555
+                                console.error('not empty', x);
+                            }
+                        };
+
+                        let set_bestmove = () => {
+                            console.text('thinking... turn:', this.turn);
+                            setsquare(this.bestmove());
+                        };
+                        while (this.turn < 10 && !this.winner) {
+                            console.log('new turn', this.turn, nextmove);
+                            if (nextmove === true) set_bestmove();
+                            else if (typeof nextmove === 'number') setsquare(nextmove);
+                            if (this.is_AI_move()) {
+                                this.make_AI_moves();
+                            }
+                            if (!this.winner && this.turn === 9) {
+                                set_bestmove();
+                                console.text('Last Move!!||red||white', this.winner);
+                                throw "lastmove";
+                            }
+                            else nextmove = yield;// {move: this.bestmove(), player: this.currentplayer()};
+                            console.text('yielded ', 'turn:' + this.turn, 'nextmove:' + nextmove, this.board);
+                            //setsquare(nextmove);
+                        }
+                        // if (!this.winner) this.winner = "NONE";
+                        // this.gamestate = __gamestate_winner;
+                        console.text('END GENERATOR');
+                    } catch (winningline) {
+                        this.gamestate = __gamestate_winner;
+                        this.log('Catch!', winningline, this.turn);
+                        switch (winningline) {
+                            case 'NONE':
+                                break;
+                            case 'XXX':
+                            case 'OOO':
+                                break;
+                            case 'lastmove':
+                            // this.checkwinner();
+                            default:
+                                this.endgame('NONE');
+                        }
+                    }
+                }
+
+                // noinspection JSUnusedGlobalSymbols
+                constructor() {
+                    super();
+                    this.log('constructor');
+
+                    ['load', 'click', 'focus', 'blur', 'transitionend'].map(evt => this.addEventListener(evt, () => this.log(' Event: ' + evt, event ? event.target : '')));
+
+                    let shadowRoot = this.attachShadow({mode: 'open'});
+                    shadowRoot.appendChild(this.querySelector('#template_custom-element_game-toes').content.cloneNode(true));
+
+                    this.registeredEvents = [];// keep track of all events added, for un-registration when Element is removed
+
+                    this.Game = shadowRoot.querySelector('#Game');
+                    /** attach a single click handler for all click interactions **/
+                    this.Game.onclick = evt => {
+                        this.log('gameclick', this);
+                        evt.stopPropagation();
+                        let target = evt.target;
+                        if (target.hasOwnProperty('idx') && this.turn < 9)
+                            this.gameplay.next(target.idx);
+                        else {
+                            this.log('gameclick', this.gamestate, evt);
+                            this.startgame();
+                        }
+                    };
+
+                    //attach multiple Setters/Getters (as data-attributes) onto this CustomElement
+                    [__gamestate, __players, __player, __tosswinner, __winner]
+                        .map(attribute => Object.defineProperty(this, attribute, {
+                            get() {
+                                return this.getAttribute(attribute);
+                            },
+                            set(value) {
+                                this.setAttribute(attribute, value);
+                                // for ultra minification:
+                                // setgetAttribute(this, attribute, value);
+                                // let setgetAttribute = (element, attr, value = false) => element[value ? 's' : 'g' + 'etAttribute'](attr, value);
+                            }
+                        }));
+
+                    this.Game.focus();
+                    this.addEvent('mouseover', () => this.Game.focus());
+
+                    this.gamestate = __gamestate_intro;//game,end
+                    window.WC = this;
+                    this.addEvent('keyup', evt => {
+                        evt.stopPropagation(); // Prevent the event from leaving this element
+                        let idx_key = evt.code.includes('Numpad') ? __square_keynrs : __square_idx;
+                        let idx = split(idx_key).indexOf(evt.key);
+                        console.log('idx', idx ? idx : 'geen idx value');
+                        console.text('gamestate:' + this.gamestate + __CSSconsole_label_1, 'keyup', evt.key, evt);
+                        switch (this.gamestate) {
+                            case __gamestate_intro:
+                                idx = split("0123").indexOf(evt.key);
+                                if (idx > -1) {
+                                    if (idx === 3) {
+                                        this.act.next(1);
+                                        this.act.next();
+                                    }
+                                    this.act.next(idx);
+                                }
+                                break;
+                            case __gamestate_toss:
+                                this.act.next();
+                                break;
+                            case __gamestate_playing:
+                                if (idx > -1) this.gameplay.next(idx);
+                                break;
+                            case __gamestate_winner:
+                                if (idx > -1) this.startgame(idx);
+                                break;
+                            case 'end':
+                                break;
+                        }
+                    });
+                }
+
+                // noinspection JSUnusedGlobalSymbols
+                attributeChangedCallback(name, oldValue, newValue) {
+                    this.log('attributeChangedCallback', name, oldValue, newValue);
+                }
+
+                // noinspection JSUnusedGlobalSymbols
+                connectedCallback() {
+                    this.log('connectedCallback');
+                    this.hideStylesheet('XXX');
+                    this.hideStylesheet('OOO');
+
+                    this.players = 2;
+                    this.startgame();
+                    return;
+
+                    let WC = this;
+                    let CRTdisplay = x => WC.shadowRoot.querySelector(`#CRT`).sheet.rules[0].style.content = '"' + x + '"';
+                    this.act = function* () {
+                        let crt = "How many players?", br = "\\A\\A";
+                        WC.actname = 'intro';
+                        WC.players = yield CRTdisplay(crt);
+                        crt += " " + WC.players;
+                        CRTdisplay(crt);
+                        WC.actname = 'toss';
+                        if (WC.players == 1) {
+                            crt += br + "Press any key to toss";
+                            yield CRTdisplay(crt);
+                            WC.tosswinner = rand(2) + 1;//rand(2) + 1;//1=human 2=computer
+                            crt += br + ["", "You", "I"][WC.tosswinner] + " won the toss";
+                        }
+                        crt += br + "Press any key to start the game";
+                        yield CRTdisplay(crt);
+                        CRTdisplay('');
+                        WC.actname = 'playing';
+                        console.text(WC.players, WC.tosswinner);
+                        WC.hideStylesheet('CRT');
+                        WC.startgame();
+                    }();
+                    CRTdisplay(this.act.next().value);
+                    // this.shadowRoot.addEventListener('click', evt => {
+                    //     evt.stopPropagation();
+                    //     console.text('clicked toes', evt, '\n', evt.srcElement, WC.winner);
+                    // });
+                }
+
+                disconnectedCallback() {
+                    this.registeredEvents.forEach(removeEvent);
+                    this._removeKeyup();
+                }
+            }
+        )
+    }(document);
+    // document.querySelector('game-toes').addEventListener('click', console.text);
+</SCRIPT>
+</BODY>
+</HTML>
